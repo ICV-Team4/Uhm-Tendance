@@ -58,12 +58,12 @@ if not os.path.exists(OUTPUT_FOLDER):
 # === 1. 웹소켓 서버 로직 ===
 
 async def handle_subscriber(websocket, path):
-    print(f"[WS Server] Client connected: {websocket.remote_address}")
+    print(f"[WS Server {WEBSOCKET_PORT}] Client connected: {websocket.remote_address}")
     SUBSCRIBERS.add(websocket)
     try:
         await websocket.wait_closed()
     except websockets.ConnectionClosed:
-        print(f"[WS Server] Client disconnected: {websocket.remote_address}")
+        print(f"[WS Server {WEBSOCKET_PORT}] Client disconnected: {websocket.remote_address}")
     finally:
         SUBSCRIBERS.remove(websocket)
 
@@ -86,7 +86,7 @@ async def start_websocket_server():
         "0.0.0.0",
         WEBSOCKET_PORT
     )
-    print(f"[WS Server] Hwa's Server started at ws://0.0.0.0:{WEBSOCKET_PORT}")
+    print(f"[WS Server {WEBSOCKET_PORT}] Hwa's Server started at ws://0.0.0.0:{WEBSOCKET_PORT}")
     await broadcast_messages()
 
 def run_server_loop():
@@ -200,7 +200,6 @@ async def main_async():
                 names_list = []
 
                 for (x, y, w, h) in faces:
-                    # *** (y_h 오타 수정됨) ***
                     face_roi = gray[y:y+h, x:x+w]
                     student_id, confidence = predict_face(face_roi)
                     confidence_percent = round(confidence * 100)
@@ -219,11 +218,12 @@ async def main_async():
                                 print(f"[ATTENDANCE] {name} (ID: {student_id}) checked in at {timestamp}")
 
                     cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+                    
                     cv2.putText(frame, f"{display_name} ({confidence_percent}%)", 
                                (x+5, y-5), font, 0.6, color, 2)
                     
-                    boxes.append([x, y, x+w, y+h])
-                    scores.append(confidence)
+                    boxes.append([int(x), int(y), int(x+w), int(y+h)])
+                    scores.append(float(confidence))
                     names_list.append(display_name)
                 
                 _, annotated_frame_jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])

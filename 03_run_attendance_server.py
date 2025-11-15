@@ -9,6 +9,7 @@ from torchvision import transforms
 from student_manager import get_all_students
 from face_model import FaceRecognitionModel
 
+# --- 새롭게 추가된 라이브러리 ---
 import zmq        # 1. ZMQ로 Tello 이미지 수신
 import base64     # 2. 이미지를 Base64로 인코딩
 import json       # 3. JSON 메시지 생성
@@ -22,7 +23,7 @@ CONFIDENCE_THRESHOLD = 0.7
 OUTPUT_FOLDER = 'output'
 MODEL_PATH = 'trainer/model.pt'
 ZMQ_PORT = 3389         # Tello 이미지가 들어오는 포트
-WEBSOCKET_PORT = 5001   # 인식 결과를 방송할 포트
+WEBSOCKET_PORT = 5000   # 인식 결과를 방송할 포트
 
 # --- 글로벌 변수 (스레드간 통신용) ---
 broadcast_queue = queue.Queue() # 메인 스레드가 여기에 메시지를 넣음
@@ -80,7 +81,6 @@ async def start_websocket_server():
 def run_server_loop():
     """
     새로운 이벤트 루프를 생성하고 그 안에서 웹소켓 서버를 실행
-    (이 함수 자체가 별도 스레드에서 실행될 것임)
     """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -138,7 +138,7 @@ def main():
     ])
 
     def predict_face(face_roi):
-        """얼굴 영역에서 학생 ID 예측"""
+        """얼굴 영역에서 학생 ID 예측 (기존 코드 동일)"""
         try:
             face_img = cv2.resize(face_roi, (IMG_SIZE, IMG_SIZE))
             face_pil = Image.fromarray(face_img)
@@ -217,8 +217,8 @@ def main():
                        (x+5, y-5), font, 0.6, color, 2)
             
             # JSON 데이터 추가
-            boxes.append([x, y, x+w, y+h]) # [x1, y1, x2, y2]
-            scores.append(confidence)
+            boxes.append([int(x), int(y), int(x+w), int(y+h)])
+            scores.append(float(confidence))
             names_list.append(display_name)
         
         # 5. 인식 결과가 그려진 프레임 (Base64 인코딩용)
