@@ -9,13 +9,14 @@ from torchvision import transforms
 from student_manager import get_all_students
 from face_model import FaceRecognitionModel
 
-import zmq
-import base64
-import json
-import asyncio
-import websockets 
-import threading
-import queue
+# --- 새롭게 추가된 라이브러리 ---
+import zmq        # 1. ZMQ로 Tello 이미지 수신
+import base64     # 2. 이미지를 Base64로 인코딩
+import json       # 3. JSON 메시지 생성
+import asyncio    # 4. 비동기 웹소켓 서버
+import websockets # 5. 웹소켓 서버
+import threading  # 6. OpenCV(Main)와 웹소켓(Server)을 분리
+import queue      # 7. 메인 스레드 -> 서버 스레드로 데이터 전송
 
 import re
 import base64
@@ -40,24 +41,30 @@ def decode_b64_image(b64_string):
 CONFIDENCE_THRESHOLD = 0.7
 OUTPUT_FOLDER = 'output'
 MODEL_PATH = 'trainer/model.pt'
-ZMQ_PORT = 3389         # Tello 이미지가 들어오는 포트
-WEBSOCKET_PORT = 5002   # 인식 결과를 방송할 포트
+
+ZMQ_PORT = int(os.getenv("ZMQ_PORT", 5555)) 
+
+WEBSOCKET_PORT = 5556   # 인식 결과를 방송할 포트
 
 # --- 글로벌 변수 (스레드간 통신용) ---
-broadcast_queue = queue.Queue() # 메인 스레드가 여기에 메시지를 넣음
-SUBSCRIBERS = set()             # 현재 접속한 클라이언트(웹 대시보드 등) 목록
+broadcast_queue = queue.Queue() 
+SUBSCRIBERS = set()             
 
 if not os.path.exists(OUTPUT_FOLDER):
     os.makedirs(OUTPUT_FOLDER)
 
 # === 1. 웹소켓 서버 로직 (별도 스레드에서 실행) ===
-async def handle_subscriber(websocket, path):
+async def handle_subscriber(websocket, path=None):
+    """
+    새 클라이언트가 접속하면 SUBSCRIBERS 세트에 추가하고,
+    접속이 끊기면 제거합니다.
+    """
     print(f"[WS Server {WEBSOCKET_PORT}] Client connected: {websocket.remote_address}")
     SUBSCRIBERS.add(websocket)
     try:
         await websocket.wait_closed()
     except websockets.ConnectionClosed:
-        print(f"[WS] Client disconnected: {websocket.remote_address}")
+        print(f"[WS Server {WEBSOCKET_PORT}] Client disconnected: {websocket.remote_address}")
     finally:
         SUBSCRIBERS.remove(websocket)
 
@@ -68,27 +75,26 @@ async def broadcast_messages():
     """
     while True:
         try:
-            # 큐에서 메시지를 가져옴 (0.1초마다 확인)
             message = broadcast_queue.get(timeout=0.1)
         except queue.Empty:
-            await asyncio.sleep(0.01) # 큐가 비어있으면 잠시 대기
+            await asyncio.sleep(0.01) 
             continue
         
-        # 큐에 메시지가 있으면 모든 구독자에게 전송
         if SUBSCRIBERS:
-            await asyncio.wait([
-                user.send(message) for user in SUBSCRIBERS
-            ])
+            await asyncio.gather(
+                *[user.send(message) for user in SUBSCRIBERS],
+                return_exceptions=True
+            )
 
 async def start_websocket_server():
     """비동기 웹소켓 서버 시작"""
     server = await websockets.serve(
         handle_subscriber,
-        "0.0.0.0",  # 모든 IP에서 접속 허용
+        "0.0.0.0",  
         WEBSOCKET_PORT
     )
-    print(f"[WS] WebSocket Server started at ws://0.0.0.0:{WEBSOCKET_PORT}")
-    await broadcast_messages() # 메시지 방송 루프 시작
+    print(f"[WS Server {WEBSOCKET_PORT}] WebSocket Server started at ws://0.0.0.0:{WEBSOCKET_PORT}")
+    await broadcast_messages() 
 
 def run_server_loop():
     """
@@ -105,7 +111,7 @@ def main():
     # --- 2-1. 웹소켓 서버 스레드 시작 ---
     server_thread = threading.Thread(target=run_server_loop, daemon=True)
     server_thread.start()
-    print("[INFO] WebSocket server thread started.")
+    print(f"[INFO] WebSocket server thread (port {WEBSOCKET_PORT}) started.")
 
     # --- 2-2. ZMQ PULL 소켓 설정 ---
     print(f"[ZMQ] Setting up ZMQ PULL socket at tcp://*:{ZMQ_PORT}")
@@ -175,7 +181,6 @@ def main():
     frame_id_counter = 0
     print("[INFO] Starting real-time attendance system... (Press 'q' in CV window to quit)")
 
-    # *** (충돌 해결: `while True`가 올바른 서버 로직입니다) ***
     while True:
         # 1. ZMQ로 Tello 이미지 수신 (JPEG 바이트)
         try:
@@ -211,14 +216,14 @@ def main():
             confidence_percent = round(confidence * 100)
             
             display_name = "Unknown"
-            color = (0, 0, 255) # Red (Unknown)
+            color = (0, 0, 255) 
             
             if confidence >= CONFIDENCE_THRESHOLD and student_id != -1:
                 name = all_student_dict.get(student_id, "ID not registered")
                 
                 if name != "ID not registered":
                     display_name = name
-                    color = (0, 255, 0) # Green (Known)
+                    color = (0, 255, 0) 
                     
                     if student_id not in attendance_log:
                         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -255,20 +260,13 @@ def main():
             },
             "boxes": boxes,
             "scores": scores,
-            "names": names_list 
+            "names": names_list
         }
         
         # 7. JSON을 큐에 넣어 웹소켓 서버 스레드로 전송
         broadcast_queue.put(json.dumps(frame_bundle))
 
-        # 8. 로컬 창에 보여주기 
-        cv2.imshow('Real-time Attendance (ZMQ Input)', frame)
-        
-        # if cv2.waitKey(1) & 0xFF == ord('q'):
-        #     break
-
     # --- 2-5. 종료 처리 ---
-    # (서버는 Ctrl+C로 종료되므로, 아래 코드는 사실상 도달하기 어렵지만 안전장치로 둡니다.)
     print("[INFO] Stopping attendance system...")
     zmq_socket.close()
     context.term()
@@ -315,13 +313,12 @@ def main():
     report_json = json.dumps(report_data, ensure_ascii=False, indent=2)
     broadcast_queue.put(report_json)
     
-    print(f"[INFO] Final report sent to all subscribers.")
+    print("[INFO] Final report sent to all subscribers.")
     print("[INFO] Attendance check process finished.")
     
     # 서버 스레드가 메시지를 보낼 수 있도록 잠시 대기
     import time
     time.sleep(1)
-
 
 if __name__ == "__main__":
     main()
