@@ -23,7 +23,7 @@ CONFIDENCE_THRESHOLD = 0.7
 OUTPUT_FOLDER = 'output'
 MODEL_PATH = 'trainer/model.pt'
 ZMQ_PORT = 3389         # Tello 이미지가 들어오는 포트
-WEBSOCKET_PORT = 5000   # 인식 결과를 방송할 포트
+WEBSOCKET_PORT = 5002   # 인식 결과를 방송할 포트
 
 # --- 글로벌 변수 (스레드간 통신용) ---
 broadcast_queue = queue.Queue() # 메인 스레드가 여기에 메시지를 넣음
@@ -34,7 +34,7 @@ if not os.path.exists(OUTPUT_FOLDER):
 
 # === 1. 웹소켓 서버 로직 (별도 스레드에서 실행) ===
 
-async def handle_subscriber(websocket, path):
+async def handle_subscriber(websocket, path=None):
     """
     새 클라이언트가 접속하면 SUBSCRIBERS 세트에 추가하고,
     접속이 끊기면 제거합니다.
@@ -64,9 +64,12 @@ async def broadcast_messages():
         # 큐에 메시지가 있으면 모든 구독자에게 전송
         if SUBSCRIBERS:
             # message는 이미 json.dumps()된 상태
-            await asyncio.wait([
-                user.send(message) for user in SUBSCRIBERS
-            ])
+            # Send to all subscribers concurrently
+            # Use gather with return_exceptions=True to handle individual failures gracefully
+            await asyncio.gather(
+                *[user.send(message) for user in SUBSCRIBERS],
+                return_exceptions=True
+            )
 
 async def start_websocket_server():
     """비동기 웹소켓 서버 시작"""
@@ -249,10 +252,10 @@ def main():
         broadcast_queue.put(json.dumps(frame_bundle))
 
         # 8. 로컬 창에 보여주기
-        cv2.imshow('Real-time Attendance (ZMQ Input)', frame)
+        # cv2.imshow('Real-time Attendance (ZMQ Input)', frame)
         
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        # if cv2.waitKey(1) & 0xFF == ord('q'):
+        #     break
 
     # --- 2-5. 종료 처리 ---
     print("[INFO] Stopping attendance system...")
