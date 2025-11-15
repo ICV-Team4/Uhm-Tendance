@@ -115,7 +115,6 @@ def main():
 
     # --- 2-2. ZMQ PULL 소켓 설정 ---
     print(f"[ZMQ] Setting up ZMQ PULL socket at tcp://*:{ZMQ_PORT}")
-    print(f"[INFO] (Hwa님 Mac에서 실행 시 5555, 석진님 서버 실행 시 5000 이어야 합니다.)")
     context = zmq.Context()
     zmq_socket = context.socket(zmq.PULL)
     zmq_socket.bind(f"tcp://*:{ZMQ_PORT}")
@@ -157,7 +156,7 @@ def main():
     ])
 
     def predict_face(face_roi):
-        """얼굴 영역에서 학생 ID 예측 (기존 코드 동일)"""
+        """얼굴 영역에서 학생 ID 예측"""
         try:
             face_img = cv2.resize(face_roi, (IMG_SIZE, IMG_SIZE))
             face_pil = Image.fromarray(face_img)
