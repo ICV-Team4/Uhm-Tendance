@@ -1,95 +1,136 @@
-# 얼굴 인식 출석 시스템
+UHM-TENDANCE: Tello 드론 연동 얼굴 인식 출석 시스템
 
-PyTorch 기반 얼굴 인식을 통한 실시간 출석 체크 시스템입니다.
+PyTorch 기반 얼굴 인식을 통해 Tello 드론의 ZMQ 영상 스트림을 실시간으로 분석하고, WebSocket을 통해 출석 결과를 방송(broadcast)하는 서버입니다.
 
-## 설치 방법
+주요 기능
 
-### 1. 필요한 패키지 설치
+실시간 ZMQ 입력: Tello 드론(클라이언트)이 전송하는 JPEG 영상 스트림을 ZMQ PULL 소켓으로 수신합니다.
 
-```bash
+실시간 얼굴 인식: 수신된 매 프레임마다 PyTorch 모델을 사용해 얼굴을 인식하고 students.json의 정보와 대조합니다.
+
+실시간 WebSocket 방송: 인식 결과(Base64 이미지, 좌표, 이름)를 frame_bundle JSON 형식으로 WebSocket 서버를 통해 모든 클라이언트(웹 대시보드)에 방송합니다.
+
+최종 리포트: 프로그램 종료 시, output/ 폴더에 CSV 리포트를 저장하고, attendance_report JSON을 WebSocket으로 마지막 방송합니다.
+
+설치 방법
+
+1. (최초 1회) 가상환경 및 패키지 설치
+
+# (icv 가상환경이 이미 있다고 가정)
+# Tello 드론 및 ZMQ/WebSocket에 필요한 패키지 설치
 pip install -r requirements.txt
-```
 
-또는 개별 설치:
 
-```bash
-pip install opencv-python torch torchvision Pillow numpy
-```
 
-## 사용 방법
+requirements.txt에 아래 패키지들이 포함되어 있는지 확인하세요:
 
-### 단계 1: 학생 얼굴 데이터 수집
+opencv-python
+torch
+torchvision
+Pillow
+numpy
+websockets
+pyzmq
+djitellopy
+ultralytics
 
-```bash
-python 01_collect_data.py
-```
 
-- 실행 시 학번과 이름을 입력하세요
-- 웹캠 앞에서 얼굴을 보여주면 자동으로 30장 촬영됩니다
-- 학생 정보는 `students.json`에 자동 저장됩니다
-- 'q' 키를 누르면 중간에 종료할 수 있습니다
 
-### 단계 2: 모델 학습
+파일 구조 (주요 파일)
 
-```bash
-python 02_train_model.py
-```
-
-- `dataset` 폴더의 이미지들을 학습합니다
-- 학습된 모델은 `trainer/model.pt`에 저장됩니다
-- 학습 진행 상황(손실, 정확도)이 표시됩니다
-- GPU가 있으면 자동으로 사용합니다
-
-### 단계 3: 출석 체크 실행
-
-```bash
-python 03_run_attendance.py
-```
-
-- 웹캠으로 실시간 얼굴 인식을 시작합니다
-- 인식된 학생은 자동으로 출석 처리됩니다
-- 출석 정보는 `output/attendance_YYYY-MM-DD.csv`에 저장됩니다
-- 'q' 키를 누르면 종료하고 CSV 파일을 저장합니다
-
-## 파일 구조
-
-```
-termproject/
-├── 01_collect_data.py          # 학생 얼굴 데이터 수집
-├── 02_train_model.py           # PyTorch 모델 학습
-├── 03_run_attendance.py        # 출석 체크 실행
-├── face_model.py               # PyTorch 모델 정의
-├── student_manager.py          # 학생 정보 관리
-├── haarcascade_frontalface_default.xml  # 얼굴 검출용
-├── requirements.txt            # 필요한 패키지 목록
-├── dataset/                    # 학생 얼굴 이미지 저장 폴더
-├── trainer/                    # 학습된 모델 저장 폴더
+Uhm-Tendance/
+├── 01_collect_data.py           # (데이터 수집용) 학생 얼굴 데이터 수집
+├── 02_train_model.py            # (데이터 수집용) PyTorch 모델 학습
+├── 03_run_attendance_server.py  # (★★실제 AI 서버★★) ZMQ 입력 -> WS 출력
+├── zmq_client_test_LOCAL.py     # (테스트용) "가짜 텔로" (MacBook 웹캠 ZMQ PUSH)
+├── mock_server_PYTHON.py        # (테스트용) "가짜 텔로" (Python WS PUSH)
+├── mock_server.js               # (테스트용) "가짜 텔로" (Node.js WS PUSH)
+├── face_model.py                # PyTorch 모델 정의
+├── student_manager.py           # 학생 정보 관리
+├── haarcascade_frontalface_default.xml
+├── requirements.txt
+├── dataset/                     # 학생 얼굴 이미지
+├── trainer/
 │   └── model.pt               # 최종 학습된 모델
-├── output/                     # 출석 기록 CSV 파일 저장 폴더
-└── students.json               # 학생 정보 (학번: 이름)
-```
+├── output/                      # 출석 기록 CSV
+└── students.json                # 학생 정보 (학번: 이름)
 
-## 주의사항
 
-1. **학생 등록 순서**: 반드시 `01_collect_data.py` → `02_train_model.py` → `03_run_attendance.py` 순서로 실행하세요.
 
-2. **웹캠 권한**: macOS에서는 웹캠 사용 권한을 허용해야 합니다.
+(선택) 1. 모델 학습 방법
 
-3. **학습 데이터**: 각 학생당 최소 20-30장의 얼굴 이미지가 필요합니다.
+trainer/model.pt 파일이 없는 경우, 먼저 모델을 학습해야 합니다.
 
-4. **조명 조건**: 일정한 조명에서 촬영하고 출석 체크하는 것이 정확도가 높습니다.
+# 1. 학생 얼굴 데이터 수집 (웹캠 필요)
+python 01_collect_data.py
 
-## 문제 해결
+# 2. 모델 학습
+python 02_train_model.py
 
-### 모델 파일을 찾을 수 없다는 오류
-- `02_train_model.py`를 먼저 실행하여 모델을 학습하세요.
 
-### 웹캠이 작동하지 않을 때
-- 다른 프로그램에서 웹캠을 사용 중인지 확인하세요.
-- `cv2.VideoCapture(0)`에서 0 대신 다른 번호(1, 2 등)를 시도해보세요.
 
-### 인식 정확도가 낮을 때
-- 더 많은 학습 이미지를 수집하세요.
-- 다양한 각도와 표정으로 촬영하세요.
-- `03_run_attendance.py`의 `CONFIDENCE_THRESHOLD` 값을 조정하세요 (기본: 0.7).
+(중요) 2. AI 서버 실행 방법
 
+AI 서버(03_run_attendance_server.py)는 ZMQ로 영상을 받고 WebSocket으로 결과를 방송합니다.
+
+A. 로컬 테스트 (Local Test)
+
+macOS의 경우 5000번 포트가 AirPlay와 충돌할 수 있으므로, 로컬 테스트 시 **5555**번 포트를 사용하도록 기본 설정되어 있습니다.
+
+터미널 2개가 필요합니다.
+
+$$터미널 1: AI 서버 실행$$
+
+# (ZMQ_PORT 환경변수 설정 안 함 -> 5555번 포트로 자동 실행됨)
+/opt/anaconda3/envs/icv/bin/python 03_run_attendance_server.py
+
+
+
+[ZMQ] Setting up ZMQ PULL socket at tcp://*:5555
+[WS Server 5556] WebSocket Server started at ws://0.0.0.0:5556
+(두 메시지가 뜨고 대기하는지 확인)
+
+$$터미널 2: ZMQ 테스트 클라이언트 (웹캠) 실행$$
+
+# 로컬 MacBook 웹캠 영상을 ZMQ 5555번 포트로 전송
+/opt/anaconda3/envs/icv/bin/python zmq_client_test_LOCAL.py
+
+
+
+[INFO] 연결 성공! tcp://127.0.0.1:5555
+(웹캠이 켜지고, 터미널 1에서 얼굴 인식 로그가 뜨기 시작함)
+
+$$결과 확인$$
+
+웹 대시보드에서 ws://localhost:5556에 접속하면 실시간 결과를 볼 수 있습니다.
+
+B. 실제 서버 배포 (Production Server)
+
+배포 서버(Linux 등)는 5000번 포트 충돌이 없으므로, 텔로 드론 ZMQ 클라이언트(5000) 포트에 맞춰 실행합니다.
+
+$$서버 터미널: AI 서버 실행$$
+
+# 1. (중요) ZMQ_PORT 환경변수를 5000으로 설정
+export ZMQ_PORT=5000
+
+# 2. AI 서버 실행
+python 03_run_attendance_server.py
+
+
+
+[ZMQ] Setting up ZMQ PULL socket at tcp://*:5000
+[WS Server 5556] WebSocket Server started at ws://0.0.0.0:5556
+(두 메시지가 뜨고 대기하는지 확인)
+
+$$결과 확인$$
+
+텔로 드론 클라이언트를 cam.uhmcv.kro.kr:5000으로 연결하면, 서버가 자동으로 인식을 시작합니다.
+
+웹 대시보드에서 ws://cam.uhmcv.kro.kr:5556에 접속하면 실시간 결과를 볼 수 있습니다.
+
+포트 정리
+
+| 서비스 | 포트 | 설명 |
+| ZMQ (Tello -> AI서버) | 5000 | (실서버용) 텔로 드론 원본 영상 |
+| WebSocket (AI서버 -> 웹) | 5556 | (최종) AI 서버 방송 포트 |
+| ZMQ (Local Test) | 5555 | (macOS 로컬 테스트용 포트) |
