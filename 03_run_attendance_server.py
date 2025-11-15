@@ -9,14 +9,32 @@ from torchvision import transforms
 from student_manager import get_all_students
 from face_model import FaceRecognitionModel
 
-# --- 새롭게 추가된 라이브러리 ---
-import zmq        # 1. ZMQ로 Tello 이미지 수신
-import base64     # 2. 이미지를 Base64로 인코딩
-import json       # 3. JSON 메시지 생성
-import asyncio    # 4. 비동기 웹소켓 서버
-import websockets # 5. 웹소켓 서버
-import threading  # 6. OpenCV(Main)와 웹소켓(Server)을 분리
-import queue      # 7. 메인 스레드 -> 서버 스레드로 데이터 전송
+import zmq
+import base64
+import json
+import asyncio
+import websockets 
+import threading
+import queue
+
+import re
+import base64
+import cv2
+import numpy as np
+
+def decode_b64_image(b64_string):
+    cleaned = re.sub(r'\s+', '', b64_string)
+    padding = len(cleaned) % 4
+    if padding != 0:
+        cleaned += '=' * (4 - padding)
+    try:
+        img_bytes = base64.b64decode(cleaned)
+    except Exception as e:
+        print("[ERROR] Base64 decode failed:", e)
+        return None
+    img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+    img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    return img
 
 # --- 설정값 ---
 CONFIDENCE_THRESHOLD = 0.7
@@ -33,13 +51,8 @@ if not os.path.exists(OUTPUT_FOLDER):
     os.makedirs(OUTPUT_FOLDER)
 
 # === 1. 웹소켓 서버 로직 (별도 스레드에서 실행) ===
-
-async def handle_subscriber(websocket, path=None):
-    """
-    새 클라이언트가 접속하면 SUBSCRIBERS 세트에 추가하고,
-    접속이 끊기면 제거합니다.
-    """
-    print(f"[WS] Client connected: {websocket.remote_address}")
+async def handle_subscriber(websocket, path):
+    print(f"[WS Server {WEBSOCKET_PORT}] Client connected: {websocket.remote_address}")
     SUBSCRIBERS.add(websocket)
     try:
         await websocket.wait_closed()
@@ -63,13 +76,9 @@ async def broadcast_messages():
         
         # 큐에 메시지가 있으면 모든 구독자에게 전송
         if SUBSCRIBERS:
-            # message는 이미 json.dumps()된 상태
-            # Send to all subscribers concurrently
-            # Use gather with return_exceptions=True to handle individual failures gracefully
-            await asyncio.gather(
-                *[user.send(message) for user in SUBSCRIBERS],
-                return_exceptions=True
-            )
+            await asyncio.wait([
+                user.send(message) for user in SUBSCRIBERS
+            ])
 
 async def start_websocket_server():
     """비동기 웹소켓 서버 시작"""
@@ -100,6 +109,7 @@ def main():
 
     # --- 2-2. ZMQ PULL 소켓 설정 ---
     print(f"[ZMQ] Setting up ZMQ PULL socket at tcp://*:{ZMQ_PORT}")
+    print(f"[INFO] (Hwa님 Mac에서 실행 시 5555, 석진님 서버 실행 시 5000 이어야 합니다.)")
     context = zmq.Context()
     zmq_socket = context.socket(zmq.PULL)
     zmq_socket.bind(f"tcp://*:{ZMQ_PORT}")
@@ -165,6 +175,7 @@ def main():
     frame_id_counter = 0
     print("[INFO] Starting real-time attendance system... (Press 'q' in CV window to quit)")
 
+    # *** (충돌 해결: `while True`가 올바른 서버 로직입니다) ***
     while True:
         # 1. ZMQ로 Tello 이미지 수신 (JPEG 바이트)
         try:
@@ -219,8 +230,7 @@ def main():
             cv2.putText(frame, f"{display_name} ({confidence_percent}%)", 
                        (x+5, y-5), font, 0.6, color, 2)
             
-            # JSON 데이터 추가
-            boxes.append([int(x), int(y), int(x+w), int(y+h)])
+            boxes.append([int(x), int(y), int(x+w), int(y+h)]) 
             scores.append(float(confidence))
             names_list.append(display_name)
         
@@ -251,13 +261,14 @@ def main():
         # 7. JSON을 큐에 넣어 웹소켓 서버 스레드로 전송
         broadcast_queue.put(json.dumps(frame_bundle))
 
-        # 8. 로컬 창에 보여주기
-        # cv2.imshow('Real-time Attendance (ZMQ Input)', frame)
+        # 8. 로컬 창에 보여주기 
+        cv2.imshow('Real-time Attendance (ZMQ Input)', frame)
         
         # if cv2.waitKey(1) & 0xFF == ord('q'):
         #     break
 
     # --- 2-5. 종료 처리 ---
+    # (서버는 Ctrl+C로 종료되므로, 아래 코드는 사실상 도달하기 어렵지만 안전장치로 둡니다.)
     print("[INFO] Stopping attendance system...")
     zmq_socket.close()
     context.term()
@@ -304,7 +315,7 @@ def main():
     report_json = json.dumps(report_data, ensure_ascii=False, indent=2)
     broadcast_queue.put(report_json)
     
-    print("[INFO] Final report sent to all subscribers.")
+    print(f"[INFO] Final report sent to all subscribers.")
     print("[INFO] Attendance check process finished.")
     
     # 서버 스레드가 메시지를 보낼 수 있도록 잠시 대기
