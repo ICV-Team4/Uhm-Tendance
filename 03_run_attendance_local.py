@@ -16,6 +16,30 @@ import websockets
 import threading
 import queue
 
+import re
+import base64
+import cv2
+import numpy as np
+
+def decode_b64_image(b64_string):
+    # 개행/공백 제거
+    cleaned = re.sub(r'\s+', '', b64_string)
+
+    # 패딩 복원
+    padding = len(cleaned) % 4
+    if padding != 0:
+        cleaned += '=' * (4 - padding)
+
+    try:
+        img_bytes = base64.b64decode(cleaned)
+    except Exception as e:
+        print("[ERROR] Base64 decode failed:", e)
+        return None
+
+    img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+    img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    return img
+
 # --- 설정값 ---
 CONFIDENCE_THRESHOLD = 0.7
 OUTPUT_FOLDER = 'output'
@@ -31,7 +55,7 @@ SUBSCRIBERS = set()
 if not os.path.exists(OUTPUT_FOLDER):
     os.makedirs(OUTPUT_FOLDER)
 
-# === 1. 웹소켓 서버 로직 (이하 동일) ===
+# === 1. 웹소켓 서버 로직 ===
 
 async def handle_subscriber(websocket, path):
     print(f"[WS Server] Client connected: {websocket.remote_address}")
@@ -74,12 +98,12 @@ def run_server_loop():
 # === 2. 이미지 처리 및 메인 로직 (메인 스레드) ===
 
 async def main_async():
-    # --- 2-1. 웹소켓 서버 스레드 시작 (기존과 동일) ---
+    # --- 2-1. 웹소켓 서버 스레드 시작 ---
     server_thread = threading.Thread(target=run_server_loop, daemon=True)
     server_thread.start()
     print(f"[INFO] Hwa's WebSocket server thread (port {WEBSOCKET_PORT}) started.")
 
-    # --- 2-2. 모델 및 학생 정보 로드 (기존과 동일) ---
+    # --- 2-2. 모델 및 학생 정보 로드 ---
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"[INFO] Using device: {DEVICE}")
 
@@ -152,17 +176,13 @@ async def main_async():
                         continue
                         
                     raw_frame_base64 = data['raw_frame']['data']
-
-                    # *** 쉼표(,)로 자르는 코드가 완전히 제거된 버전입니다 ***
-                    jpeg_bytes = base64.b64decode(raw_frame_base64)
                     
-                except (json.JSONDecodeError, base64.binascii.Error, TypeError) as e:
-                    print(f"[WS Client] Error processing/decoding message: {e}")
+                except (json.JSONDecodeError, TypeError) as e:
+                    print(f"[WS Client] Error processing message: {e}")
                     continue
 
                 # 2. JPEG 바이트 -> OpenCV 프레임으로 디코딩
-                np_arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
-                frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                frame = decode_b64_image(raw_frame_base64)
 
                 if frame is None:
                     print("[ERROR] Failed to decode frame from mock server.")
@@ -180,7 +200,7 @@ async def main_async():
                 names_list = []
 
                 for (x, y, w, h) in faces:
-                    # 1x1 픽셀 이미지에서는 얼굴이 감지되지 않으므로 이 코드는 실행되지 않습니다.
+                    # *** (y_h 오타 수정됨) ***
                     face_roi = gray[y:y+h, x:x+w]
                     student_id, confidence = predict_face(face_roi)
                     confidence_percent = round(confidence * 100)
