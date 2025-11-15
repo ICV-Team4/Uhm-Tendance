@@ -9,7 +9,6 @@ from torchvision import transforms
 from student_manager import get_all_students
 from face_model import FaceRecognitionModel
 
-# --- 새롭게 추가된 라이브러리 ---
 import zmq        # 1. ZMQ로 Tello 이미지 수신
 import base64     # 2. 이미지를 Base64로 인코딩
 import json       # 3. JSON 메시지 생성
@@ -23,7 +22,7 @@ CONFIDENCE_THRESHOLD = 0.7
 OUTPUT_FOLDER = 'output'
 MODEL_PATH = 'trainer/model.pt'
 ZMQ_PORT = 3389         # Tello 이미지가 들어오는 포트
-WEBSOCKET_PORT = 5000   # 인식 결과를 방송할 포트
+WEBSOCKET_PORT = 5001   # 인식 결과를 방송할 포트
 
 # --- 글로벌 변수 (스레드간 통신용) ---
 broadcast_queue = queue.Queue() # 메인 스레드가 여기에 메시지를 넣음

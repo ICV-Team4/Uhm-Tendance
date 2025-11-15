@@ -21,8 +21,8 @@ CONFIDENCE_THRESHOLD = 0.7
 OUTPUT_FOLDER = 'output'
 MODEL_PATH = 'trainer/model.pt'
 
-MOCK_SERVER_URL = "ws://localhost:8080"
-WEBSOCKET_PORT = 5000
+MOCK_SERVER_URL = "ws://127.0.0.1:8080" 
+WEBSOCKET_PORT = 5001
 
 # --- 글로벌 변수 (스레드간 통신용) ---
 broadcast_queue = queue.Queue()
@@ -31,7 +31,7 @@ SUBSCRIBERS = set()
 if not os.path.exists(OUTPUT_FOLDER):
     os.makedirs(OUTPUT_FOLDER)
 
-# === 1. 웹소켓 서버 로직 ===
+# === 1. 웹소켓 서버 로직 (이하 동일) ===
 
 async def handle_subscriber(websocket, path):
     print(f"[WS Server] Client connected: {websocket.remote_address}")
@@ -77,7 +77,7 @@ async def main_async():
     # --- 2-1. 웹소켓 서버 스레드 시작 (기존과 동일) ---
     server_thread = threading.Thread(target=run_server_loop, daemon=True)
     server_thread.start()
-    print("[INFO] Hwa's WebSocket server thread (port 5000) started.")
+    print(f"[INFO] Hwa's WebSocket server thread (port {WEBSOCKET_PORT}) started.")
 
     # --- 2-2. 모델 및 학생 정보 로드 (기존과 동일) ---
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -147,16 +147,17 @@ async def main_async():
                 try:
                     data = json.loads(message)
 
-                    if 'raw_frame' in data and 'data' in data['raw_frame']:
-                        raw_frame_base64 = data['raw_frame']['data']
-                    else:
+                    if 'raw_frame' not in data or 'data' not in data['raw_frame']:
                         print(f"[WS Client] Unknown JSON format received: {data.keys()}")
                         continue
                         
+                    raw_frame_base64 = data['raw_frame']['data']
+
+                    # *** 쉼표(,)로 자르는 코드가 완전히 제거된 버전입니다 ***
                     jpeg_bytes = base64.b64decode(raw_frame_base64)
                     
-                except Exception as e:
-                    print(f"[WS Client] Error processing received message: {e}")
+                except (json.JSONDecodeError, base64.binascii.Error, TypeError) as e:
+                    print(f"[WS Client] Error processing/decoding message: {e}")
                     continue
 
                 # 2. JPEG 바이트 -> OpenCV 프레임으로 디코딩
@@ -179,6 +180,7 @@ async def main_async():
                 names_list = []
 
                 for (x, y, w, h) in faces:
+                    # 1x1 픽셀 이미지에서는 얼굴이 감지되지 않으므로 이 코드는 실행되지 않습니다.
                     face_roi = gray[y:y+h, x:x+w]
                     student_id, confidence = predict_face(face_roi)
                     confidence_percent = round(confidence * 100)
@@ -221,7 +223,7 @@ async def main_async():
                     "names": names_list
                 }
                 
-                # 7. 5000번 서버로 방송 
+                # 7. 5001번 서버로 방송 
                 broadcast_queue.put(json.dumps(frame_bundle))
 
                 # 8. 로컬 창에 보여주기
@@ -267,7 +269,7 @@ async def main_async():
         report_json = json.dumps(report_data, ensure_ascii=False, indent=2)
         broadcast_queue.put(report_json)
         
-        print("[INFO] Final report sent to Hwa's server (5000).")
+        print(f"[INFO] Final report sent to Hwa's server ({WEBSOCKET_PORT}).")
         print("[INFO] Attendance check process finished.")
         
         import time
